@@ -2,16 +2,19 @@ import type { INestApplication } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 
+import { FakeRedis } from './fakes/redis.fake';
+
 import { AppModule } from '@/app.module';
 import { configureApp } from '@/bootstrap/configure-app';
 import { PrismaService } from '@/infrastructure/prisma/prisma.service';
+import { REDIS_CLIENT } from '@/infrastructure/redis/redis.constants';
 
 /**
  * End-to-end coverage for the health endpoints.
  *
- * The Prisma dependency is stubbed so this suite runs without a live database
- * (fast, hermetic). A separate integration suite (Testcontainers) will exercise
- * the real database in a later step.
+ * External dependencies (Prisma, Redis) are stubbed so this suite runs without
+ * live infrastructure (fast, hermetic). A separate integration suite
+ * (Testcontainers) will exercise the real services in a later step.
  */
 describe('Health (e2e)', () => {
   let app: INestApplication;
@@ -29,6 +32,9 @@ describe('Health (e2e)', () => {
         onModuleInit: () => Promise.resolve(),
         onModuleDestroy: () => Promise.resolve(),
       })
+      // Replace the real ioredis client with an in-memory fake (no live Redis).
+      .overrideProvider(REDIS_CLIENT)
+      .useValue(new FakeRedis())
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -54,5 +60,6 @@ describe('Health (e2e)', () => {
     expect(response.body.status).toBe('ok');
     expect(response.body.info).toHaveProperty('database');
     expect(response.body.info.database.status).toBe('up');
+    expect(response.body.info.redis.status).toBe('up');
   });
 });

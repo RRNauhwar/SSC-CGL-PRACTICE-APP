@@ -7,6 +7,8 @@ import { buildLoggerConfig } from './common/logging/logger.config';
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfigService } from './config/app-config.service';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
+import { RedisModule } from './infrastructure/redis/redis.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 
 /**
@@ -32,6 +34,8 @@ import { HealthModule } from './modules/health/health.module';
         }),
     }),
     PrismaModule,
+    RedisModule,
+    AuthModule,
     HealthModule,
   ],
   providers: [
