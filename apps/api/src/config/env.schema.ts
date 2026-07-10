@@ -48,11 +48,38 @@ export const envSchema = z
     S3_BUCKET: z.string().min(1),
     S3_FORCE_PATH_STYLE: booleanFromString.default('true'),
 
-    // --- Auth / Security (consumed by the Auth module in a later step) ---
+    // --- Auth / Security: JWT ---
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
     JWT_ACCESS_TTL: z.coerce.number().int().positive().default(900),
     JWT_REFRESH_TTL: z.coerce.number().int().positive().default(1209600),
+    // Token issuer/audience claims — validated on verify to reject foreign tokens.
+    JWT_ISSUER: z.string().default('ssc-prep'),
+    JWT_AUDIENCE: z.string().default('ssc-prep-clients'),
+
+    // --- Auth / Security: One-Time Passwords (email OTP) ---
+    OTP_LENGTH: z.coerce.number().int().min(4).max(10).default(6),
+    OTP_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+    // Max verify attempts per issued OTP before it is invalidated.
+    OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+    // Minimum seconds between two OTP requests for the same identifier.
+    OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+    // Max OTP requests per identifier within a rolling hour.
+    OTP_MAX_PER_HOUR: z.coerce.number().int().positive().default(5),
+
+    // --- Auth / Security: brute-force protection (password login) ---
+    LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
+    LOGIN_LOCKOUT_SECONDS: z.coerce.number().int().positive().default(900),
+
+    // --- Auth / Security: Google Sign-In ---
+    // OAuth client id used to verify Google ID tokens. Empty => Google login disabled.
+    GOOGLE_CLIENT_ID: z.string().optional().or(z.literal('')),
+
+    // --- Mail ---
+    // Transport for transactional email (OTP, etc.). `console` logs to stdout in dev.
+    MAIL_TRANSPORT: z.enum(['console', 'smtp']).default('console'),
+    MAIL_FROM: z.string().default('SSC Prep <no-reply@sscprep.local>'),
+    SMTP_URL: z.string().url().optional().or(z.literal('')),
   })
   .superRefine((env, ctx) => {
     // Enforce distinct signing secrets so an access-token leak cannot mint refresh tokens.
@@ -69,6 +96,14 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         message: 'OTEL_EXPORTER_OTLP_ENDPOINT is required when OTEL_ENABLED=true',
         path: ['OTEL_EXPORTER_OTLP_ENDPOINT'],
+      });
+    }
+    // The SMTP transport requires a connection URL.
+    if (env.MAIL_TRANSPORT === 'smtp' && !env.SMTP_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SMTP_URL is required when MAIL_TRANSPORT=smtp',
+        path: ['SMTP_URL'],
       });
     }
   });
