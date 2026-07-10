@@ -2,9 +2,10 @@
 // SSC Prep Platform — Prisma schema
 // Source of truth: docs/prd/14-database-architecture.md
 //
-// This file currently defines the IDENTITY & ACCESS bounded context only
-// (users, roles, credentials, preferences). Subsequent feature steps extend
-// this schema additively (sessions/devices/OTP in Auth; content/assessment;
+// This file defines the IDENTITY & ACCESS bounded context (users, roles,
+// credentials, preferences) and the AUTH SESSION context (sessions, devices).
+// One-time passwords (OTP) are stored ephemerally in Redis, not here.
+// Subsequent feature steps extend this schema additively (content/assessment;
 // analytics; etc.) via new Prisma migrations — never by rewriting existing
 // models.
 // =============================================================================
@@ -53,6 +54,18 @@ enum Theme {
   @@map("theme")
 }
 
+/// Why a refresh-token session was terminated. Used for audit + reuse detection.
+enum SessionRevokeReason {
+  LOGOUT
+  ROTATED // superseded by a newer token in the same family (normal rotation)
+  REUSE_DETECTED // an already-rotated token was replayed => whole family killed
+  ADMIN_REVOKED
+  PASSWORD_CHANGED
+  EXPIRED
+
+  @@map("session_revoke_reason")
+}
+
 // -----------------------------------------------------------------------------
 // Identity & Access
 // -----------------------------------------------------------------------------
@@ -75,6 +88,8 @@ model User {
   credentials AuthCredential[]
   roles       UserRole[]
   preferences UserPreference?
+  sessions    Session[]
+  devices     Device[]
 
   @@index([status])
   @@map("users")
@@ -147,4 +162,58 @@ model UserPreference {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
+}
+
+
+// -----------------------------------------------------------------------------
+// Auth sessions & devices (doc 15 — session & device management)
+// -----------------------------------------------------------------------------
+
+/// A client device a user signs in from. Enables "manage your devices" and
+/// per-device session revocation. Identified by a stable client fingerprint.
+model Device {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  /// Stable, client-generated identifier (sent via the `x-device-id` header).
+  fingerprint String  @map("fingerprint")
+  /// Human-friendly label, e.g. "Ravi's Android".
+  name       String?
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@map("devices")
+}
+
+/// A refresh-token session. Each successful authentication opens a session; a
+/// refresh rotates it (old row revoked as ROTATED, new row created in the same
+/// `familyId`). Replaying a rotated token trips reuse detection and the whole
+/// family is revoked. Only the SHA-256 hash of the refresh token is stored.
+model Session {
+  id               String               @id @default(uuid()) @db.Uuid
+  userId           String               @map("user_id") @db.Uuid
+  /// Rotation lineage: all rotations of one login share a family id.
+  familyId         String               @map("family_id") @db.Uuid
+  /// SHA-256 hex digest of the issued refresh token (never the raw token).
+  refreshTokenHash String               @unique @map("refresh_token_hash")
+  deviceId         String?              @map("device_id") @db.Uuid
+  userAgent        String?              @map("user_agent")
+  ipAddress        String?              @map("ip_address")
+  expiresAt        DateTime             @map("expires_at")
+  revokedAt        DateTime?            @map("revoked_at")
+  revokedReason    SessionRevokeReason? @map("revoked_reason")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  lastUsedAt       DateTime             @default(now()) @map("last_used_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("sessions")
 }

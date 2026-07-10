@@ -79,6 +79,41 @@ export class AppConfigService {
       refreshSecret: this.get('JWT_REFRESH_SECRET'),
       accessTtlSeconds: this.get('JWT_ACCESS_TTL'),
       refreshTtlSeconds: this.get('JWT_REFRESH_TTL'),
+      issuer: this.get('JWT_ISSUER'),
+      audience: this.get('JWT_AUDIENCE'),
+    };
+  }
+
+  get otp() {
+    return {
+      length: this.get('OTP_LENGTH'),
+      ttlSeconds: this.get('OTP_TTL_SECONDS'),
+      maxAttempts: this.get('OTP_MAX_ATTEMPTS'),
+      resendCooldownSeconds: this.get('OTP_RESEND_COOLDOWN_SECONDS'),
+      maxPerHour: this.get('OTP_MAX_PER_HOUR'),
+    };
+  }
+
+  get loginSecurity() {
+    return {
+      maxAttempts: this.get('LOGIN_MAX_ATTEMPTS'),
+      lockoutSeconds: this.get('LOGIN_LOCKOUT_SECONDS'),
+    };
+  }
+
+  get google() {
+    const clientId = this.get('GOOGLE_CLIENT_ID');
+    return {
+      clientId: clientId || undefined,
+      enabled: Boolean(clientId),
+    };
+  }
+
+  get mail() {
+    return {
+      transport: this.get('MAIL_TRANSPORT'),
+      from: this.get('MAIL_FROM'),
+      smtpUrl: this.get('SMTP_URL') || undefined,
     };
   }
 }
