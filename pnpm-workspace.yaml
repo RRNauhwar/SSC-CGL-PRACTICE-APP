@@ -1,0 +1,6 @@
+# pnpm workspace definition.
+# Apps are deployable units (NestJS API, Next.js web, FastAPI AI service).
+# Packages are shared, versioned internal libraries consumed by the apps.
+packages:
+  - 'apps/*'
+  - 'packages/*'

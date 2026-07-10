@@ -1,0 +1,150 @@
+// =============================================================================
+// SSC Prep Platform — Prisma schema
+// Source of truth: docs/prd/14-database-architecture.md
+//
+// This file currently defines the IDENTITY & ACCESS bounded context only
+// (users, roles, credentials, preferences). Subsequent feature steps extend
+// this schema additively (sessions/devices/OTP in Auth; content/assessment;
+// analytics; etc.) via new Prisma migrations — never by rewriting existing
+// models.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  // `native` for local dev; the musl target matches the Alpine-based runtime image.
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // Extensions relied upon by the platform (doc 12 / doc 14).
+  extensions = [vector, pg_trgm, pgcrypto, uuidOssp(map: "uuid-ossp")]
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING // account created, not yet verified
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+
+  @@map("user_status")
+}
+
+enum AuthProvider {
+  PASSWORD
+  EMAIL_OTP
+  GOOGLE
+
+  @@map("auth_provider")
+}
+
+enum Theme {
+  SYSTEM
+  LIGHT
+  DARK
+  HIGH_CONTRAST
+
+  @@map("theme")
+}
+
+// -----------------------------------------------------------------------------
+// Identity & Access
+// -----------------------------------------------------------------------------
+
+/// A platform user (aspirant, admin, etc.). Roles are assigned via UserRole.
+model User {
+  id        String     @id @default(uuid()) @db.Uuid
+  /// E.164 phone number; primary identifier for the Indian audience (doc 15).
+  phone     String?    @unique
+  email     String?    @unique
+  name      String?
+  /// Public, unique handle used for profiles/leaderboards (doc 09).
+  handle    String?    @unique
+  /// BCP-47 locale, e.g. "en", "hi". Drives i18n (doc 10).
+  locale    String     @default("en")
+  status    UserStatus @default(PENDING)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  credentials AuthCredential[]
+  roles       UserRole[]
+  preferences UserPreference?
+
+  @@index([status])
+  @@map("users")
+}
+
+/// A single authentication method for a user (password, email-OTP, Google, ...).
+/// A user may have multiple credentials (e.g. Google + phone-OTP).
+model AuthCredential {
+  id           String       @id @default(uuid()) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  provider     AuthProvider
+  /// Provider-specific subject id (e.g. Google `sub`). Null for password.
+  providerUid  String?      @map("provider_uid")
+  /// Argon2id/bcrypt hash for the PASSWORD provider only; never the raw secret.
+  passwordHash String?      @map("password_hash")
+  mfaEnabled   Boolean      @default(false) @map("mfa_enabled")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // A user has at most one credential per provider; provider uids are unique per provider.
+  @@unique([userId, provider])
+  @@unique([provider, providerUid])
+  @@index([userId])
+  @@map("auth_credentials")
+}
+
+/// System role (RBAC). Seeded with a fixed set (learner, admin, ...) in a later step.
+model Role {
+  id          String     @id @default(uuid()) @db.Uuid
+  /// Stable, machine-readable role key, e.g. "learner", "admin".
+  name        String     @unique
+  description String?
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  users UserRole[]
+
+  @@map("roles")
+}
+
+/// Join table assigning roles to users (many-to-many).
+model UserRole {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+/// Per-user preferences (theme, language, notifications, data saver) — doc 10 / doc 11.
+model UserPreference {
+  userId            String  @id @map("user_id") @db.Uuid
+  theme             Theme   @default(SYSTEM)
+  /// UI language (BCP-47); may differ from account `locale`.
+  language          String  @default("en")
+  /// Granular per-type/channel notification settings (doc 11).
+  notificationPrefs Json    @default("{}") @map("notification_prefs")
+  /// Local time window during which non-critical notifications are muted, e.g. "22:00-07:00".
+  quietHours        String? @map("quiet_hours")
+  /// Low-bandwidth data-saver mode (doc 10 — accessibility).
+  dataSaver         Boolean @default(false) @map("data_saver")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
